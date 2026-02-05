@@ -1,0 +1,50 @@
+初始化（只做一件事：存 URL 列表 + 轮转指针）
+# 在 __init__ 里
+raw = self.config.reward_model.v_custom_args.translate_url
+# 允许 "url1,url2,url3" 或 list
+if isinstance(raw, (list, tuple)):
+    self.xcomet_urls = [u.rstrip("/") for u in raw]
+else:
+    self.xcomet_urls = [u.rstrip("/") for u in raw.split(",")]
+
+self._rr_idx = 0          # 轮转指针
+self.xcomet_batch_size = 16
+self.xcomet_timeout = 180
+
+
+
+
+
+def _pick_url(self):
+    url = self.xcomet_urls[self._rr_idx % len(self.xcomet_urls)]
+    self._rr_idx += 1
+    return url
+
+
+
+def server_request_next_critic(self, input_list):
+    # 把 input_list 变成 xcomet 需要的 items
+    items, penalties = self._build_xcomet_items_and_penalties(input_list)
+
+    payload = {
+        "items": items,
+        "batch_size": min(self.xcomet_batch_size, len(items)),
+    }
+
+    # 只选一个 URL（轮转）
+    base_url = self._pick_url()
+    url = base_url + "/score_batch"
+
+    resp = requests.post(url, json=payload, timeout=self.xcomet_timeout)
+    data = resp.json()
+
+    raw_scores = data["scores"]
+
+    # 后处理
+    results = []
+    for s, p in zip(raw_scores, penalties):
+        s = float(s) * 5.0
+        s = max(0.0, s - p * 2.0)
+        results.append(s)
+
+    return results
