@@ -1,0 +1,89 @@
+线程池的用法
+
+方式一：用map
+import time
+
+from concurrent.futures import ThreadPoolExecutor
+
+def work(x):
+    print(f"start {x}")
+    time.sleep(1)
+    print(f"end {x}")
+    return x * x
+
+# 创建线程池（最多 2 个线程）
+with ThreadPoolExecutor(max_workers=2) as pool:
+    # map：并发执行 work(x)
+    results = pool.map(work, [0, 1, 2, 3])
+
+    # 结果按输入顺序返回
+    for r in results:
+        print("result:", r)
+
+方式二：用submit+as_completed
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+def work(x):
+    print(f"start {x}")
+    time.sleep(1)
+    print(f"end {x}")
+    return x * x
+
+with ThreadPoolExecutor(max_workers=2) as pool:
+    # submit：逐个提交任务，返回 Future
+    futures = [pool.submit(work, i) for i in [0, 1, 2, 3]]
+
+    # as_completed：哪个先完成就先处理哪个
+    for fut in as_completed(futures):
+        result = fut.result()
+        print("result:", result)
+
+
+
+多进程
+
+import os
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
+
+IN_PATH = "/path/to/input.txt"
+OUT_PATH = "/path/to/output.txt"
+
+# ====== 1) worker 内的全局重对象（每个进程各自一份）======
+_heavy_obj = None
+
+def init_worker():
+    """
+    每个子进程启动时只执行一次：初始化重对象/词典/模型/分词器等
+    """
+    global _heavy_obj
+    _heavy_obj = {"pid": os.getpid()}  # 示例：替换成 tokenizer / jieba.initialize() / model.load()
+
+def process_one(line: bytes) -> bytes:
+    """
+    2) worker 纯计算：输入 bytes -> 输出 bytes
+    不做文件 I/O，不 print，不 tqdm
+    """
+    global _heavy_obj
+    s = line.decode("utf-8").rstrip("\n")
+    # 示例逻辑：把每行变成 "pid<TAB>原文"
+    out = f"{_heavy_obj['pid']}\t{s}\n"
+    return out.encode("utf-8")
+
+def main():
+    # ====== 3) 进程数 & chunksize ======
+    nproc = min(cpu_count(), 16)      # 按机器调整上限
+    chunksize = 256                  # 典型 128~1024 之间试
+
+    # ====== 4) 主进程负责读 & 写 ======
+    with open(IN_PATH, "rb") as fin, open(OUT_PATH, "wb") as fout:
+        with Pool(processes=nproc, initializer=init_worker) as pool:
+            it = pool.imap(process_one, fin, chunksize=chunksize)
+            for out_line in tqdm(it, desc=f"mp({nproc})", unit="line"):
+                fout.write(out_line)
+
+    print("done:", OUT_PATH)
+
+if __name__ == "__main__":
+    main()
