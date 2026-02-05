@@ -1,0 +1,68 @@
+工作流：
+预先准备：用字符语向比，控制符，占位符等手段筛选清除翻译的平行语料
+
+1.先用jieba对中文进行分词（中文必须先分词，否则 fast_align 基本不可用；英文不需要额外处理是因为天然以空格分词。）https://github.com/fxsjy/jieba
+
+    并转化为这种数据格式：   token_1 token_2 token_3 ... ||| token_a token_b token_c ...   
+
+2.用fast align 进行词对齐      https://github.com/clab/fast_align
+
+3.术语候选：根据分词后的翻译句对，fastalign的结果，就可以构建出terms对，额外计算(en, zh) 对齐次数，包含(en,zh)的句子次数，方便后续过滤
+
+4.构建术语库：
+
+过滤停用词
+数据形态（如数字，结构符，大写）
+多译冲突判断（candidates是否大于2），对齐强度（即上步算的指标）排除噪声/偶发，（如第二候选很少就是偶发）
+用对齐次数计算一个干预价值的score（第二译法在数量、稳定性及相对主译法占比上的综合重要性），这样就计算出一个衡量该英文词用来作为terms的价值是多少
+5.构造sft数据:
+
+  根据术语库，从en原文里筛选出来terms，根据score确定该翻译对用哪些terms；然后可以基于优质大模型API进行替换term以后的译文合成
+
+prompt = """你是严格术语约束的翻译引擎。将 source 翻译为中文，并严格使用 terms 中给定的译文。
+输出协议：最终输出必须且只能是一段中文译文（纯文本），不得包含任何解释、前缀（如“译文：”）、JSON、Markdown、代码块、编号或空行。
+
+【质量要求】
+- 忠实原文：禁止臆造、漏译、扩写或回答原文内容
+- 数字、单位、专有名词必须准确；网址/邮箱/emoji/符号必须原样保留
+- 术语：若 terms 覆盖，则必须使用 terms 指定译文；若 terms 未覆盖且不确定标准译法，则保留英文并保证上下文通顺
+- 标点：允许为符合中文表达习惯做必要调整，但不得无意义增补
+- 文件名：若出现形如“xxx.ext”，扩展名（如 .docx/.pdf/.csv 等）必须原样保留不翻译；其余部分可翻译
+
+
+【输入】
+source: {source}
+terms: {terms}
+
+【术语强约束】
+- 对 terms 中每条“源术语→指定译文”，只要源术语在 source 中出现（含大小写,单复数等常见变化,缩写如 NWS/NNWS/NPT 视为匹配），译文中必须使用指定译文
+- 不得改写术语译文、不得用同义词替代、不得遗漏
+- 不要为了覆盖术语而硬插不相关译文；以与 source 片段最直接对应者为准
+
+【输出】
+仅输出译文本身（不要加外层引号）。
+
+"""
+
+实验结果
+评测集：干预成功率的测试集是单独构建的，故这里会有两个评测，而翻译能力还是用的之前的测试集
+
+干预成功率：
+tb:https://tensorboard-intervesft-11189869-bj0505-vtraining.vmic.xyz/base/#timeseries
+
+自动化评测：http://vtraining.vivo.lan:8080/openapi/v2/model-eval/submit-task?config=trans-sft-enzh2&token=Jfbsk42955LkKskB
+
+
+
+可以看出，添加了术语干预的sft数据，在干预成功率上效果较好，100step就到达90多了
+
+翻译能力：
+tb：https://tensorboard-transtb-11189869-bj0505-vtraining.vmic.xyz/base/#timeseries
+
+自动化评测：http://vtraining.vivo.lan:8080/openapi/v2/model-eval/submit-task?config=trans-sft-enzh&token=tbVtRAFDHU48qB7N
+
+
+
+可以看到，添加了术语干预的数据后，翻译能力并没有下降，甚至略微好于未加干预的数据
+
+可能是对照数据并不是翻译类型的数据，所以我们干预数据的结果会好点，但无论如何，添加了干预数据并不会造成翻译能力的下降
