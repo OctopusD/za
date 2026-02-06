@@ -1,0 +1,60 @@
+client.py  ←→  server.py
+   stdin        stdout
+
+stdio是给进程使用的
+
+stdio	同一台机器	❌	❌
+socket	同机 / 异机	✅	✅
+HTTP	基于 socket	✅	✅
+想象你要给朋友寄一封信。
+
+现实世界里，至少有三件事：
+路：信是通过哪条路走的
+
+运输规则：怎么保证信不丢、不乱序
+
+信件格式：信里内容怎么写，对方才看得懂
+
+计算机通信一模一样。
+
+路	socket
+运输规则	TCP
+信件格式	协议（HTTP / MCP 等）
+1) 你如果要做“对外 API 服务”（最常见）
+你应该用：HTTP（框架），不是裸 socket
+Python 服务端：FastAPI / Flask
+
+最小示例（Python，FastAPI 服务端）：
+
+# server_http.py
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/weather")
+def weather(city: str):
+    return {"city": city, "temp": 11.2}
+
+启动（示例）：
+
+uvicorn server_http:app --host 0.0.0.0 --port 8000
+
+客户端（requests）：
+
+import requests
+r = requests.get("http://127.0.0.1:8000/weather", params={"city": "Beijing"})
+print(r.json())
+
+2) 你如果要做“实时双向通信”（聊天/推送）
+你应该用：WebSocket（仍然不是裸 socket）
+WebSocket 是运行在 TCP 之上的成熟协议
+
+适合长连接、实时推送
+
+3) 你如果要做“本地进程间工具通信”（MCP 这种）
+你应该用：stdio（或 Unix domain socket），而不是 HTTP
+本地工具链：stdio 最简单安全
+
+不暴露端口，不需要网络权限
+
+易组合（管道哲学）
